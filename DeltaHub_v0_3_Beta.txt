@@ -29,13 +29,17 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local CONFIG = {
     AdminUserId = 2048530043,
 
-    -- Replace with your real HTTPS API address.
+    -- Put your Cloudflare Worker address here, no trailing slash, e.g.
+    -- "https://deltahub-api.yourname.workers.dev"
     API_BASE = "https://YOUR-DELTAHUB-SERVICE.example",
 
     Version = "0.3 Beta"
 }
 
 local IsAdmin = Player.UserId == CONFIG.AdminUserId
+
+CONFIG.API_BASE = (CONFIG.API_BASE:gsub("/+$", ""))
+local API_CONFIGURED = not CONFIG.API_BASE:find("YOUR%-DELTAHUB")
 
 local C = {
     Background = Color3.fromRGB(17, 18, 25),
@@ -474,17 +478,6 @@ local function toggleEffect(name, enabled)
     end
 end
 
-local function setVisual(name, enabled)
-    EffectState[name] = enabled
-    toggleEffect(name, enabled)
-
-    local b = VisualButtons[name]
-    if b then
-        b.Text = name .. (enabled and "  [ON]" or "  [OFF]")
-        animate(b, {BackgroundColor3 = enabled and C.Accent or C.Button})
-    end
-end
-
 local VisualNames = {
     "Bloom",
     "SunRays",
@@ -494,6 +487,64 @@ local VisualNames = {
     "Contrast",
     "Saturation"
 }
+
+local PremiumVisualNames = {
+    "Cinematic",
+    "DepthOfField",
+    "WarmTone",
+    "ColdTone"
+}
+
+local PremiumSet = {}
+for _, premiumName in ipairs(PremiumVisualNames) do
+    PremiumSet[premiumName] = true
+end
+
+local IsPremium = false
+local PremiumModule = nil -- premium code, delivered by the server only with a valid key
+
+local function refreshVisualText(name)
+    local b = VisualButtons[name]
+    if not b then return end
+
+    local prefix = PremiumSet[name] and "★ " or ""
+
+    if PremiumSet[name] and not IsPremium then
+        b.Text = prefix .. name .. "  [Premium]"
+    else
+        b.Text = prefix .. name .. (EffectState[name] and "  [ON]" or "  [OFF]")
+    end
+
+    animate(b, {BackgroundColor3 = EffectState[name] and C.Accent or C.Button})
+end
+
+local function setVisual(name, enabled)
+    if PremiumSet[name] then
+        if enabled and not PremiumModule then
+            return
+        end
+
+        EffectState[name] = enabled
+
+        local fullName = EFFECT_PREFIX .. name
+        local leftover = Lighting:FindFirstChild(fullName)
+
+        if leftover and not enabled then
+            leftover:Destroy()
+        end
+
+        if PremiumModule then
+            pcall(PremiumModule.toggle, name, enabled, Lighting, EFFECT_PREFIX)
+        end
+
+        refreshVisualText(name)
+        return
+    end
+
+    EffectState[name] = enabled
+    toggleEffect(name, enabled)
+    refreshVisualText(name)
+end
 
 label(Visuals, "Визуальные эффекты", 30)
 
@@ -510,6 +561,46 @@ for _, effectName in ipairs(VisualNames) do
     )
 end
 
+local PremiumVisualsLabel = label(Visuals, "Premium эффекты ★", 24, C.Accent)
+
+for _, effectName in ipairs(PremiumVisualNames) do
+    VisualButtons[effectName] = button(
+        Visuals,
+        "★ " .. effectName .. "  [Premium]",
+        function()
+            if not IsPremium then
+                PremiumVisualsLabel.Text = "Нужен активный Premium (вкладка Premium)"
+                return
+            end
+
+            PremiumVisualsLabel.Text = "Premium эффекты ★"
+            setVisual(effectName, not EffectState[effectName])
+        end,
+        function()
+            return EffectState[effectName] == true
+        end
+    )
+end
+
+local function applyPremiumState(module)
+    PremiumModule = module
+    IsPremium = module ~= nil
+
+    if not IsPremium then
+        for _, premiumName in ipairs(PremiumVisualNames) do
+            if EffectState[premiumName] then
+                setVisual(premiumName, false)
+            end
+        end
+    end
+
+    for _, premiumName in ipairs(PremiumVisualNames) do
+        refreshVisualText(premiumName)
+    end
+
+    PremiumVisualsLabel.Text = "Premium эффекты ★"
+end
+
 --==================================================
 -- FRIENDS
 --==================================================
@@ -520,6 +611,7 @@ local Favorites = {}
 label(FriendsPage, "DeltaHub Friends", 30)
 
 local FriendInput = input(FriendsPage, "Roblox ID или ник игрока")
+local FriendsStatus = label(FriendsPage, "", 20, C.Muted)
 
 local FriendList = create("Frame", {
     Size = UDim2.new(1, 0, 0, 10),
@@ -571,10 +663,11 @@ button(FriendsPage, "Добавить игрока", function()
 
     if found then
         Friends[found.UserId] = {Name = found.Name}
+        FriendsStatus.Text = "Добавлен: " .. found.Name
         FriendInput.Text = ""
         refreshFriends()
     else
-        warn("Игрок не найден в текущем сервере.")
+        FriendsStatus.Text = "Игрок не найден на текущем сервере."
     end
 end)
 
@@ -594,28 +687,35 @@ label(FriendsPage,
 -- API CLIENT
 --==================================================
 
-local function requestAPI(method, path, body)
-    if CONFIG.API_BASE:find("YOUR%-DELTAHUB") then
-        return false, "API address is not configured"
+local function requestAPI(method, path, body, extraHeaders)
+    if not API_CONFIGURED then
+        return false, "Адрес API не настроен (CONFIG.API_BASE)"
     end
 
     local requestFunction =
         (syn and syn.request)
         or (http and http.request)
+        or http_request
         or request
 
     if not requestFunction then
-        return false, "HTTP request is unavailable"
+        return false, "HTTP-запросы недоступны в этом executor"
+    end
+
+    local headers = {
+        ["Content-Type"] = "application/json",
+        ["X-DeltaHub-UserId"] = tostring(Player.UserId)
+    }
+
+    for k, v in pairs(extraHeaders or {}) do
+        headers[k] = v
     end
 
     local success, response = pcall(function()
         return requestFunction({
             Url = CONFIG.API_BASE .. path,
             Method = method,
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["X-DeltaHub-UserId"] = tostring(Player.UserId)
-            },
+            Headers = headers,
             Body = body and HttpService:JSONEncode(body) or nil
         })
     end)
@@ -624,72 +724,158 @@ local function requestAPI(method, path, body)
         return false, tostring(response)
     end
 
-    if not response or response.StatusCode < 200
-        or response.StatusCode >= 300 then
-        return false, "HTTP request failed"
+    if type(response) ~= "table" then
+        return false, "Нет ответа от API"
     end
 
     local decodedOK, decoded = pcall(function()
         return HttpService:JSONDecode(response.Body)
     end)
 
+    local status = response.StatusCode or 0
+
+    if status < 200 or status >= 300 then
+        local message = "HTTP " .. tostring(status)
+        if decodedOK and type(decoded) == "table" and decoded.error then
+            message = tostring(decoded.error)
+        end
+        return false, message
+    end
+
     if not decodedOK then
-        return false, "Invalid API response"
+        return false, "Некорректный ответ API"
     end
 
     return true, decoded
+end
+
+local function formatExpiry(ms)
+    local ok, text = pcall(function()
+        return os.date("!%d.%m.%Y %H:%M", math.floor(ms / 1000)) .. " UTC"
+    end)
+
+    return ok and text or tostring(ms)
 end
 
 --==================================================
 -- PREMIUM
 --==================================================
 
-label(PremiumPage, "DeltaHub Premium", 30)
+local KEY_FILE = "DeltaHub_license.txt"
+local LicenseKey = ""
 
-local PremiumStatus = label(PremiumPage, "Статус: не проверен", 30, C.Accent)
-local PremiumExpiry = label(PremiumPage, "Срок: неизвестен", 30, C.Muted)
+pcall(function()
+    if isfile and readfile and isfile(KEY_FILE) then
+        LicenseKey = (readfile(KEY_FILE):gsub("%s+", ""))
+    end
+end)
 
-local function refreshPremium()
-    PremiumStatus.Text = "Проверяем Premium..."
-    PremiumStatus.TextColor3 = C.Accent
-
-    task.spawn(function()
-        local ok, result = requestAPI(
-            "GET",
-            "/v1/premium/" .. tostring(Player.UserId)
-        )
-
-        if not ok then
-            PremiumStatus.Text = "Premium: сервис не подключён"
-            PremiumStatus.TextColor3 = C.Muted
-            PremiumExpiry.Text = tostring(result)
-            return
-        end
-
-        if result.active then
-            PremiumStatus.Text = "Premium: АКТИВЕН"
-            PremiumStatus.TextColor3 = C.Green
-
-            PremiumExpiry.Text =
-                result.expiresAt and
-                ("Действует до: " .. tostring(result.expiresAt))
-                or "Срок: навсегда"
-        else
-            PremiumStatus.Text = "Premium: НЕ АКТИВЕН"
-            PremiumStatus.TextColor3 = C.Muted
-            PremiumExpiry.Text = "Подписка отсутствует или истекла"
+local function saveKey(key)
+    pcall(function()
+        if writefile then
+            writefile(KEY_FILE, key)
         end
     end)
 end
 
+label(PremiumPage, "DeltaHub Premium", 30)
+
+local PremiumStatus = label(PremiumPage, "Статус: не проверен", 22, C.Accent)
+local PremiumExpiry = label(PremiumPage, "Срок: неизвестен", 22, C.Muted)
+
+local LicenseInput = input(PremiumPage, "Лицензионный ключ (DH-XXXXX-...)")
+LicenseInput.Text = LicenseKey
+
+local function setPremiumMessage(status, color, detail)
+    PremiumStatus.Text = status
+    PremiumStatus.TextColor3 = color
+    PremiumExpiry.Text = detail or ""
+end
+
+local function refreshPremium()
+    setPremiumMessage("Проверяем Premium...", C.Accent, "")
+
+    task.spawn(function()
+        local key = LicenseKey
+
+        if key == "" then
+            applyPremiumState(nil)
+            setPremiumMessage("Premium: ключ не введён", C.Muted, "Введи ключ, который выдал администратор")
+            return
+        end
+
+        local headers = {["X-DeltaHub-Key"] = key}
+
+        local ok, result = requestAPI(
+            "GET",
+            "/v1/premium/" .. tostring(Player.UserId),
+            nil,
+            headers
+        )
+
+        if not ok then
+            setPremiumMessage("Premium: нет связи с сервисом", C.Muted, tostring(result))
+            return
+        end
+
+        if not result.active then
+            applyPremiumState(nil)
+            setPremiumMessage(
+                "Premium: НЕ АКТИВЕН",
+                C.Muted,
+                "Ключ неверный, срок истёк или Premium не выдан"
+            )
+            return
+        end
+
+        local okFeatures, features = requestAPI("GET", "/v1/premium/features", nil, headers)
+
+        if not okFeatures or type(features) ~= "table" or type(features.code) ~= "string" then
+            setPremiumMessage("Premium: не удалось загрузить функции", C.Red, tostring(features))
+            return
+        end
+
+        local loader, loadError = loadstring(features.code)
+
+        if not loader then
+            setPremiumMessage("Premium: ошибка загрузки", C.Red, tostring(loadError))
+            return
+        end
+
+        local okRun, module = pcall(loader)
+
+        if not okRun or type(module) ~= "table" or type(module.toggle) ~= "function" then
+            setPremiumMessage("Premium: ошибка загрузки", C.Red, tostring(module))
+            return
+        end
+
+        applyPremiumState(module)
+
+        setPremiumMessage(
+            "Premium: АКТИВЕН",
+            C.Green,
+            result.expiresAt
+                and ("Действует до: " .. formatExpiry(result.expiresAt))
+                or "Срок: навсегда"
+        )
+    end)
+end
+
+button(PremiumPage, "Активировать ключ", function()
+    LicenseKey = (LicenseInput.Text:gsub("^%s+", ""):gsub("%s+$", ""))
+    saveKey(LicenseKey)
+    refreshPremium()
+end)
+
 button(PremiumPage, "Обновить статус Premium", refreshPremium)
 
 label(PremiumPage,
-    "Планируемые преимущества:\n" ..
-    "• Дополнительные визуалы\n" ..
-    "• Premium-темы\n" ..
-    "• Особые настройки оформления",
-    80, C.Muted
+    "Что даёт Premium:\n" ..
+    "• ★ Cinematic, DepthOfField, WarmTone, ColdTone\n" ..
+    "  (вкладка «Визуалы»)\n" ..
+    "• Код Premium-функций приходит с сервера\n" ..
+    "  только по твоему ключу",
+    90, C.Muted
 )
 
 --==================================================
@@ -705,6 +891,7 @@ if IsAdmin then
         45, C.Muted
     )
 
+    local KeyInput = input(AdminPage, "Админ-ключ (хранится только в памяти)")
     local TargetInput = input(AdminPage, "Roblox UserId или username")
 
     local DurationOptions = {
@@ -727,75 +914,156 @@ if IsAdmin then
         end
     )
 
-    local function adminRequest(action)
-        local target = TargetInput.Text
+    local AdminOutput = label(AdminPage, "Результат появится здесь.", 40, C.Muted)
+    AdminOutput.AutomaticSize = Enum.AutomaticSize.Y
 
-        if target == "" then
-            warn("Сначала введи ID или ник.")
+    local function showResult(ok, text)
+        AdminOutput.Text = text
+        AdminOutput.TextColor3 = ok and C.Green or C.Red
+    end
+
+    local function adminCall(method, path, body, onSuccess)
+        if KeyInput.Text == "" then
+            showResult(false, "Введи админ-ключ.")
             return
         end
 
+        AdminOutput.Text = "Запрос..."
+        AdminOutput.TextColor3 = C.Muted
+
         task.spawn(function()
             local ok, result = requestAPI(
-                "POST",
-                "/v1/admin/premium",
-                {
-                    action = action,
-                    target = target,
-                    duration = DurationOptions[durationIndex][2]
-                }
+                method,
+                path,
+                body,
+                {["X-DeltaHub-AdminKey"] = KeyInput.Text}
             )
 
             if ok then
-                print("DeltaHub Admin:", result.message or "Success")
+                onSuccess(result)
             else
-                warn("Admin API:", result)
+                showResult(false, "Ошибка: " .. tostring(result))
             end
         end)
     end
 
+    local function premiumAction(action)
+        local target = TargetInput.Text
+
+        if target == "" then
+            showResult(false, "Введи ID или ник игрока.")
+            return
+        end
+
+        adminCall(
+            "POST",
+            "/v1/admin/premium",
+            {
+                action = action,
+                target = target,
+                duration = DurationOptions[durationIndex][2]
+            },
+            function(result)
+                local text = result.message or "Готово"
+
+                if result.expiresAt then
+                    text = text .. "\nДо: " .. formatExpiry(result.expiresAt)
+                elseif action == "grant" then
+                    text = text .. "\nСрок: навсегда"
+                end
+
+                if result.key then
+                    text = text .. "\nКлюч: " .. result.key
+                end
+
+                showResult(true, text)
+            end
+        )
+    end
+
     button(AdminPage, "Выдать Premium", function()
-        adminRequest("grant")
+        premiumAction("grant")
     end)
 
     button(AdminPage, "Снять Premium", function()
-        adminRequest("revoke")
+        premiumAction("revoke")
+    end)
+
+    button(AdminPage, "Новый ключ (если старый утёк)", function()
+        premiumAction("newkey")
     end)
 
     button(AdminPage, "Найти пользователя", function()
         local target = TargetInput.Text
+
         if target == "" then
-            warn("Сначала введи ID или ник.")
+            showResult(false, "Введи ID или ник игрока.")
             return
         end
 
-        task.spawn(function()
-            local ok, result = requestAPI(
-                "GET",
-                "/v1/admin/user/" .. HttpService:UrlEncode(target)
-            )
+        adminCall(
+            "GET",
+            "/v1/admin/user/" .. HttpService:UrlEncode(target),
+            nil,
+            function(result)
+                local lines = {
+                    tostring(result.username or "?") .. " (" .. tostring(result.userId) .. ")",
+                    "Premium: " .. (result.premium and "да" or "нет")
+                }
 
-            if ok then
-                print("Пользователь:", result.username)
-                print("Premium:", result.premium)
-                print("Истечение:", result.expiresAt)
-            else
-                warn("Поиск:", result)
+                if result.premium then
+                    table.insert(lines,
+                        result.expiresAt
+                            and ("Действует до: " .. formatExpiry(result.expiresAt))
+                            or "Срок: навсегда"
+                    )
+                end
+
+                if result.key then
+                    table.insert(lines, "Ключ: " .. result.key)
+                end
+
+                table.insert(lines, "Сейчас в DeltaHub: " .. (result.online and "да" or "нет"))
+                showResult(true, table.concat(lines, "\n"))
             end
-        end)
+        )
     end)
 
     button(AdminPage, "Список активных пользователей", function()
-        task.spawn(function()
-            local ok, result = requestAPI("GET", "/v1/admin/active-users")
+        adminCall("GET", "/v1/admin/active-users", nil, function(result)
+            local users = result.users or {}
+            local lines = {"Онлайн: " .. #users}
 
-            if ok then
-                for _, user in ipairs(result.users or {}) do
-                    print(user.username, user.userId)
+            for i, user in ipairs(users) do
+                if i > 25 then
+                    table.insert(lines, "…")
+                    break
                 end
-            else
-                warn("Мониторинг:", result)
+                table.insert(lines, tostring(user.username) .. " (" .. tostring(user.userId) .. ")")
             end
+
+            showResult(true, table.concat(lines, "\n"))
+        end)
+    end)
+
+    button(AdminPage, "Список Premium-пользователей", function()
+        adminCall("GET", "/v1/admin/premium-list", nil, function(result)
+            local users = result.users or {}
+            local lines = {"Premium: " .. #users}
+
+            for i, user in ipairs(users) do
+                if i > 25 then
+                    table.insert(lines, "…")
+                    break
+                end
+
+                table.insert(lines,
+                    tostring(user.username) .. " (" .. tostring(user.userId) .. ") — " ..
+                    (user.expiresAt and formatExpiry(user.expiresAt) or "навсегда")
+                )
+            end
+
+            showResult(true, table.concat(lines, "\n"))
         end)
     end)
 end
@@ -810,6 +1078,10 @@ button(Settings, "Сбросить визуальные эффекты", functio
     for _, effectName in ipairs(VisualNames) do
         setVisual(effectName, false)
     end
+
+    for _, effectName in ipairs(PremiumVisualNames) do
+        setVisual(effectName, false)
+    end
 end)
 
 button(Settings, "Сбросить положение окна", function()
@@ -820,8 +1092,9 @@ label(Settings,
     "DeltaHub v" .. CONFIG.Version ..
     "\nAuthor: lesikarseniu21" ..
     "\nTester: sasha2274380" ..
-    "\nDesign: ChatGPT",
-    85, C.Muted
+    "\nDesign: ChatGPT" ..
+    "\n\nДля статуса Premium сервис получает твой Roblox ID и ник.",
+    120, C.Muted
 )
 
 --==================================================
@@ -942,5 +1215,16 @@ track(UserInputService.InputEnded:Connect(function(inputObject)
         dragging = false
     end
 end))
+
+if API_CONFIGURED then
+    task.spawn(refreshPremium)
+
+    task.spawn(function()
+        while GUI.Parent do
+            requestAPI("POST", "/v1/ping", {username = Player.Name})
+            task.wait(300)
+        end
+    end)
+end
 
 print("DeltaHub " .. CONFIG.Version .. " loaded.")
