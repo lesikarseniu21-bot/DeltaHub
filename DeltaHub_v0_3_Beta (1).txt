@@ -31,7 +31,7 @@ local CONFIG = {
 
     -- Put your Cloudflare Worker address here, no trailing slash, e.g.
     -- "https://deltahub-api.yourname.workers.dev"
-    API_BASE =https://broken-paper-4629.lesikarseniu21.workers.dev/
+    API_BASE ="https://broken-paper-4629.lesikarseniu21.workers.dev/"
     Version = "0.3 Beta"
 }
 
