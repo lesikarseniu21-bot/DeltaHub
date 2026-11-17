@@ -1,0 +1,542 @@
+-- Delta Hub | Обновленная версия с Главной, Визуалами и Настройками
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Твой официальный Roblox ID
+local DEVELOPER_USER_ID = 2048530043
+
+-- Удаляем старый интерфейс при перезапуске скрипта
+if PlayerGui:FindFirstChild("DeltaHubUI") then
+    PlayerGui.DeltaHubUI:Destroy()
+end
+
+-- Сохраняем исходные настройки освещения для корректного сброса
+local DefaultLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    GlobalShadows = Lighting.GlobalShadows,
+    EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
+    EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale
+}
+
+-- Хранилище для функций сброса
+local ResetCallbacks = {}
+
+-- 1. Главный контейнер
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DeltaHubUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = PlayerGui
+
+-- 2. Основное окно
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 560, 0, 360)
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -180)
+MainFrame.BackgroundColor3 = Color3.fromRGB(16, 17, 22)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 6)
+MainCorner.Parent = MainFrame
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(45, 50, 65)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = MainFrame
+
+-- 3. Верхняя панель
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 42)
+TopBar.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MainFrame
+
+local TopCorner = Instance.new("UICorner")
+TopCorner.CornerRadius = UDim.new(0, 6)
+TopCorner.Parent = TopBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(0, 200, 1, 0)
+Title.Position = UDim2.new(0, 16, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "▲ DELTA HUB"
+Title.TextColor3 = Color3.fromRGB(235, 240, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+-- Кнопка закрытия
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -36, 0.5, -15)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(32, 35, 44)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(200, 200, 210)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.Parent = TopBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 4)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- 4. Боковое меню навигации
+local SideBar = Instance.new("Frame")
+SideBar.Name = "SideBar"
+SideBar.Size = UDim2.new(0, 145, 1, -42)
+SideBar.Position = UDim2.new(0, 0, 0, 42)
+SideBar.BackgroundColor3 = Color3.fromRGB(19, 21, 27)
+SideBar.BorderSizePixel = 0
+SideBar.Parent = MainFrame
+
+local SideLayout = Instance.new("UIListLayout")
+SideLayout.Padding = UDim.new(0, 6)
+SideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+SideLayout.SortOrder = Enum.SortOrder.LayoutOrder
+SideLayout.Parent = SideBar
+
+local SidePadding = Instance.new("UIPadding")
+SidePadding.PaddingTop = UDim.new(0, 10)
+SidePadding.Parent = SideBar
+
+-- 5. Область контента
+local ContentArea = Instance.new("Frame")
+ContentArea.Name = "ContentArea"
+ContentArea.Size = UDim2.new(1, -145, 1, -42)
+ContentArea.Position = UDim2.new(0, 145, 0, 42)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainFrame
+
+local Pages = {}
+local Buttons = {}
+
+local function CreateTab(tabName, isLocked, lockReason)
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Name = tabName .. "Btn"
+    TabBtn.Size = UDim2.new(0, 125, 0, 32)
+    TabBtn.BackgroundColor3 = Color3.fromRGB(26, 29, 38)
+    TabBtn.Text = isLocked and ("🔒 " .. tabName) or tabName
+    TabBtn.TextColor3 = isLocked and Color3.fromRGB(110, 115, 130) or Color3.fromRGB(210, 215, 230)
+    TabBtn.Font = Enum.Font.GothamMedium
+    TabBtn.TextSize = 13
+    TabBtn.Parent = SideBar
+
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 4)
+    BtnCorner.Parent = TabBtn
+
+    local Page = Instance.new("ScrollingFrame")
+    Page.Name = tabName .. "Page"
+    Page.Size = UDim2.new(1, -24, 1, -24)
+    Page.Position = UDim2.new(0, 12, 0, 12)
+    Page.BackgroundColor3 = Color3.fromRGB(22, 24, 31)
+    Page.BorderSizePixel = 0
+    Page.ScrollBarThickness = 3
+    Page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Page.Visible = false
+    Page.Parent = ContentArea
+
+    local PageCorner = Instance.new("UICorner")
+    PageCorner.CornerRadius = UDim.new(0, 6)
+    PageCorner.Parent = Page
+
+    if isLocked then
+        local LockLabel = Instance.new("TextLabel")
+        LockLabel.Size = UDim2.new(1, -40, 1, 0)
+        LockLabel.Position = UDim2.new(0, 20, 0, 0)
+        LockLabel.BackgroundTransparency = 1
+        LockLabel.Text = "⚠️ РАЗДЕЛ ВРЕМЕННО ОТКЛЮЧЕН\n\n" .. (lockReason or "Ожидание подключения сервера.")
+        LockLabel.TextColor3 = Color3.fromRGB(220, 140, 60)
+        LockLabel.Font = Enum.Font.GothamBold
+        LockLabel.TextSize = 14
+        LockLabel.TextWrapped = true
+        LockLabel.Parent = Page
+    else
+        local PageLayout = Instance.new("UIListLayout")
+        PageLayout.Padding = UDim.new(0, 8)
+        PageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        PageLayout.Parent = Page
+
+        local PagePadding = Instance.new("UIPadding")
+        PagePadding.PaddingTop = UDim.new(0, 12)
+        PagePadding.PaddingLeft = UDim.new(0, 12)
+        PagePadding.PaddingRight = UDim.new(0, 12)
+        PagePadding.PaddingBottom = UDim.new(0, 12)
+        PagePadding.Parent = Page
+    end
+
+    Pages[tabName] = Page
+    Buttons[tabName] = TabBtn
+
+    TabBtn.MouseButton1Click:Connect(function()
+        for name, p in pairs(Pages) do
+            p.Visible = (name == tabName)
+            Buttons[name].BackgroundColor3 = (name == tabName) and Color3.fromRGB(45, 95, 210) or Color3.fromRGB(26, 29, 38)
+        end
+    end)
+
+    return Page
+end
+
+-- Вспомогательная функция для создания переключателей (Toggle)
+local function CreateToggle(parent, titleText, descText, callback)
+    local state = false
+
+    local Container = Instance.new("Frame")
+    Container.Size = UDim2.new(1, 0, 0, 48)
+    Container.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+    Container.BorderSizePixel = 0
+    Container.Parent = parent
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 5)
+    Corner.Parent = Container
+
+    local TitleLbl = Instance.new("TextLabel")
+    TitleLbl.Size = UDim2.new(1, -70, 0, 20)
+    TitleLbl.Position = UDim2.new(0, 12, 0, 6)
+    TitleLbl.BackgroundTransparency = 1
+    TitleLbl.Text = titleText
+    TitleLbl.TextColor3 = Color3.fromRGB(235, 240, 255)
+    TitleLbl.Font = Enum.Font.GothamBold
+    TitleLbl.TextSize = 13
+    TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLbl.Parent = Container
+
+    local DescLbl = Instance.new("TextLabel")
+    DescLbl.Size = UDim2.new(1, -70, 0, 16)
+    DescLbl.Position = UDim2.new(0, 12, 0, 26)
+    DescLbl.BackgroundTransparency = 1
+    DescLbl.Text = descText
+    DescLbl.TextColor3 = Color3.fromRGB(150, 155, 170)
+    DescLbl.Font = Enum.Font.Gotham
+    DescLbl.TextSize = 11
+    DescLbl.TextXAlignment = Enum.TextXAlignment.Left
+    DescLbl.Parent = Container
+
+    local ToggleBtn = Instance.new("TextButton")
+    ToggleBtn.Size = UDim2.new(0, 44, 0, 24)
+    ToggleBtn.Position = UDim2.new(1, -56, 0.5, -12)
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(45, 49, 62)
+    ToggleBtn.Text = "OFF"
+    ToggleBtn.TextColor3 = Color3.fromRGB(180, 185, 200)
+    ToggleBtn.Font = Enum.Font.GothamBold
+    ToggleBtn.TextSize = 11
+    ToggleBtn.Parent = Container
+
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 4)
+    BtnCorner.Parent = ToggleBtn
+
+    local function SetState(newState)
+        state = newState
+        ToggleBtn.Text = state and "ON" or "OFF"
+        ToggleBtn.BackgroundColor3 = state and Color3.fromRGB(45, 95, 210) or Color3.fromRGB(45, 49, 62)
+        ToggleBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 185, 200)
+        callback(state)
+    end
+
+    ToggleBtn.MouseButton1Click:Connect(function()
+        SetState(not state)
+    end)
+
+    -- Регистрируем функцию сброса для этого переключателя
+    table.insert(ResetCallbacks, function()
+        if state then
+            SetState(false)
+        end
+    end)
+
+    return SetState
+end
+
+-- ==========================================
+-- 1. ВКЛАДКА: ГЛАВНАЯ (Самая первая)
+-- ==========================================
+local HomePage = CreateTab("Главная", false)
+
+local WelcomeBox = Instance.new("Frame")
+WelcomeBox.Size = UDim2.new(1, 0, 0, 85)
+WelcomeBox.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+WelcomeBox.BorderSizePixel = 0
+WelcomeBox.Parent = HomePage
+
+local WCorner = Instance.new("UICorner")
+WCorner.CornerRadius = UDim.new(0, 6)
+WCorner.Parent = WelcomeBox
+
+local WTitle = Instance.new("TextLabel")
+WTitle.Size = UDim2.new(1, -24, 0, 24)
+WTitle.Position = UDim2.new(0, 12, 0, 10)
+WTitle.BackgroundTransparency = 1
+WTitle.Text = "Добро пожаловать в Delta Hub, " .. LocalPlayer.DisplayName .. "!"
+WTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
+WTitle.Font = Enum.Font.GothamBold
+WTitle.TextSize = 14
+WTitle.TextXAlignment = Enum.TextXAlignment.Left
+WTitle.Parent = WelcomeBox
+
+local WDesc = Instance.new("TextLabel")
+WDesc.Size = UDim2.new(1, -24, 0, 42)
+WDesc.Position = UDim2.new(0, 12, 0, 36)
+WDesc.BackgroundTransparency = 1
+WDesc.Text = "Delta Hub — многофункциональный скрипт с улучшением графики до уровня реальной жизни, системой кланов и глобальным чатом."
+WDesc.TextColor3 = Color3.fromRGB(170, 175, 190)
+WDesc.Font = Enum.Font.Gotham
+WDesc.TextSize = 12
+WDesc.TextWrapped = true
+WDesc.TextXAlignment = Enum.TextXAlignment.Left
+WDesc.TextYAlignment = Enum.TextYAlignment.Top
+WDesc.Parent = WelcomeBox
+
+local InfoBox = Instance.new("Frame")
+InfoBox.Size = UDim2.new(1, 0, 0, 95)
+InfoBox.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+InfoBox.BorderSizePixel = 0
+InfoBox.Parent = HomePage
+
+local ICorner = Instance.new("UICorner")
+ICorner.CornerRadius = UDim.new(0, 6)
+ICorner.Parent = InfoBox
+
+local InfoText = Instance.new("TextLabel")
+InfoText.Size = UDim2.new(1, -24, 1, -16)
+InfoText.Position = UDim2.new(0, 12, 0, 8)
+InfoText.BackgroundTransparency = 1
+InfoText.Text = string.format(
+    "📌 Информация о скрипте:\n• Версия: 1.2 Release\n• Статус: Активен\n• Ваш Roblox ID: %d\n• Доступ: %s",
+    LocalPlayer.UserId,
+    (LocalPlayer.UserId == DEVELOPER_USER_ID) and "Разработчик (Полный)" or "Пользователь"
+)
+InfoText.TextColor3 = Color3.fromRGB(200, 210, 230)
+InfoText.Font = Enum.Font.GothamMedium
+InfoText.TextSize = 12
+InfoText.TextXAlignment = Enum.TextXAlignment.Left
+InfoText.TextYAlignment = Enum.TextYAlignment.Top
+InfoText.Parent = InfoBox
+
+-- ==========================================
+-- 2. ВКЛАДКА: ВИЗУАЛЫ (Реалистичная графика)
+-- ==========================================
+local VisualsPage = CreateTab("Визуалы", false)
+
+-- Эффект 1: Ультра-реалистичное освещение (RTX / Future)
+CreateToggle(VisualsPage, "Реалистичное освещение (RTX)", "Включает технологию Future, мягкие тени и отражения", function(enabled)
+    if enabled then
+        pcall(function() sethiddenproperty(Lighting, "Technology", Enum.Technology.Future) end)
+        Lighting.GlobalShadows = true
+        Lighting.EnvironmentDiffuseScale = 1
+        Lighting.EnvironmentSpecularScale = 1
+        Lighting.Brightness = 2.2
+    else
+        Lighting.GlobalShadows = DefaultLighting.GlobalShadows
+        Lighting.EnvironmentDiffuseScale = DefaultLighting.EnvironmentDiffuseScale
+        Lighting.EnvironmentSpecularScale = DefaultLighting.EnvironmentSpecularScale
+        Lighting.Brightness = DefaultLighting.Brightness
+    end
+end)
+
+-- Эффект 2: Натуральная цветокоррекция (Как в реальной жизни)
+CreateToggle(VisualsPage, "Живые цвета (Color Correction)", "Настраивает естественную контрастность и насыщенность", function(enabled)
+    local cc = Lighting:FindFirstChild("DeltaRealCC")
+    if enabled then
+        if not cc then
+            cc = Instance.new("ColorCorrectionEffect")
+            cc.Name = "DeltaRealCC"
+            cc.Parent = Lighting
+        end
+        cc.Contrast = 0.18
+        cc.Saturation = 0.15
+        cc.Brightness = 0.02
+        cc.TintColor = Color3.fromRGB(255, 250, 245)
+    else
+        if cc then cc:Destroy() end
+    end
+end)
+
+-- Эффект 3: Кинематографичное размытие вдали (Depth of Field)
+CreateToggle(VisualsPage, "Глубина резкости (Фокус камеры)", "Размывает дальний фон как на камере в реальной жизни", function(enabled)
+    local dof = Lighting:FindFirstChild("DeltaRealDOF")
+    if enabled then
+        if not dof then
+            dof = Instance.new("DepthOfFieldEffect")
+            dof.Name = "DeltaRealDOF"
+            dof.Parent = Lighting
+        end
+        dof.FarIntensity = 0.25
+        dof.FocusDistance = 45
+        dof.InFocusRadius = 35
+        dof.NearIntensity = 0
+    else
+        if dof then dof:Destroy() end
+    end
+end)
+
+-- Эффект 4: Солнечные лучи и свечение (SunRays + Bloom)
+CreateToggle(VisualsPage, "Солнечные лучи и блики", "Добавляет реалистичные лучи солнца и мягкое свечение", function(enabled)
+    local rays = Lighting:FindFirstChild("DeltaRealRays")
+    local bloom = Lighting:FindFirstChild("DeltaRealBloom")
+    if enabled then
+        if not rays then
+            rays = Instance.new("SunRaysEffect")
+            rays.Name = "DeltaRealRays"
+            rays.Parent = Lighting
+        end
+        rays.Intensity = 0.15
+        rays.Spread = 0.6
+
+        if not bloom then
+            bloom = Instance.new("BloomEffect")
+            bloom.Name = "DeltaRealBloom"
+            bloom.Parent = Lighting
+        end
+        bloom.Intensity = 0.4
+        bloom.Size = 24
+        bloom.Threshold = 1.2
+    else
+        if rays then rays:Destroy() end
+        if bloom then bloom:Destroy() end
+    end
+end)
+
+-- ==========================================
+-- 3. ОСТАЛЬНЫЕ ВКЛАДКИ
+-- ==========================================
+local FriendsPage = CreateTab("Друзья", false)
+local ClansPage   = CreateTab("Кланы", true, "Система кланов ожидает разблокировки API Base.")
+local ChatPage    = CreateTab("Глобал Чат", true, "Чат и нейро-модерация временно отключены.\nПричина: API Base недоступен.")
+
+-- ==========================================
+-- 4. ВКЛАДКА: НАСТРОЙКИ
+-- ==========================================
+local SettingsPage = CreateTab("Настройки", false)
+
+local function CreateActionButton(parent, btnText, descText, btnColor, onClick)
+    local Container = Instance.new("Frame")
+    Container.Size = UDim2.new(1, 0, 0, 52)
+    Container.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+    Container.BorderSizePixel = 0
+    Container.Parent = parent
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 5)
+    Corner.Parent = Container
+
+    local TitleLbl = Instance.new("TextLabel")
+    TitleLbl.Size = UDim2.new(1, -135, 0, 20)
+    TitleLbl.Position = UDim2.new(0, 12, 0, 7)
+    TitleLbl.BackgroundTransparency = 1
+    TitleLbl.Text = btnText
+    TitleLbl.TextColor3 = Color3.fromRGB(235, 240, 255)
+    TitleLbl.Font = Enum.Font.GothamBold
+    TitleLbl.TextSize = 13
+    TitleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLbl.Parent = Container
+
+    local DescLbl = Instance.new("TextLabel")
+    DescLbl.Size = UDim2.new(1, -135, 0, 16)
+    DescLbl.Position = UDim2.new(0, 12, 0, 28)
+    DescLbl.BackgroundTransparency = 1
+    DescLbl.Text = descText
+    DescLbl.TextColor3 = Color3.fromRGB(150, 155, 170)
+    DescLbl.Font = Enum.Font.Gotham
+    DescLbl.TextSize = 11
+    DescLbl.TextXAlignment = Enum.TextXAlignment.Left
+    DescLbl.Parent = Container
+
+    local ActionBtn = Instance.new("TextButton")
+    ActionBtn.Size = UDim2.new(0, 110, 0, 30)
+    ActionBtn.Position = UDim2.new(1, -122, 0.5, -15)
+    ActionBtn.BackgroundColor3 = btnColor
+    ActionBtn.Text = "Сбросить"
+    ActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    ActionBtn.Font = Enum.Font.GothamBold
+    ActionBtn.TextSize = 12
+    ActionBtn.Parent = Container
+
+    local BCorner = Instance.new("UICorner")
+    BCorner.CornerRadius = UDim.new(0, 4)
+    BCorner.Parent = ActionBtn
+
+    ActionBtn.MouseButton1Click:Connect(function()
+        onClick(ActionBtn)
+    end)
+end
+
+-- Кнопка 1: Сбросить только настройки/визуалы
+CreateActionButton(
+    SettingsPage,
+    "Сбросить все настройки",
+    "Отключает все визуальные эффекты и возвращает стандартный вид",
+    Color3.fromRGB(45, 95, 210),
+    function(btn)
+        for _, resetFn in ipairs(ResetCallbacks) do
+            resetFn()
+        end
+        btn.Text = "Сброшено!"
+        task.delay(1.5, function()
+            if btn then btn.Text = "Сбросить" end
+        end)
+    end
+)
+
+-- Кнопка 2: Полный сброс всего скрипта
+CreateActionButton(
+    SettingsPage,
+    "Сбросить всё (Полный сброс)",
+    "Выключает все функции, очищает эффекты и возвращает на Главную",
+    Color3.fromRGB(200, 60, 65),
+    function(btn)
+        for _, resetFn in ipairs(ResetCallbacks) do
+            resetFn()
+        end
+        -- Принудительная очистка возможных остаточных эффектов
+        for _, name in ipairs({"DeltaRealCC", "DeltaRealDOF", "DeltaRealRays", "DeltaRealBloom"}) do
+            local obj = Lighting:FindFirstChild(name)
+            if obj then obj:Destroy() end
+        end
+        btn.Text = "Готово!"
+        task.wait(0.6)
+        btn.Text = "Сбросить"
+        -- Возврат на вкладку "Главная"
+        for name, p in pairs(Pages) do
+            p.Visible = (name == "Главная")
+            Buttons[name].BackgroundColor3 = (name == "Главная") and Color3.fromRGB(45, 95, 210) or Color3.fromRGB(26, 29, 38)
+        end
+    end
+)
+
+-- ==========================================
+-- 5. АДМИН ПАНЕЛЬ (Только для твоего ID)
+-- ==========================================
+if LocalPlayer.UserId == DEVELOPER_USER_ID then
+    local AdminPage = CreateTab("🛡️ Админ Панель", false)
+    
+    local AdminTitle = Instance.new("TextLabel")
+    AdminTitle.Size = UDim2.new(1, 0, 0, 30)
+    AdminTitle.BackgroundTransparency = 1
+    AdminTitle.Text = "Добро пожаловать, создатель! Доступ подтвержден."
+    AdminTitle.TextColor3 = Color3.fromRGB(100, 220, 140)
+    AdminTitle.Font = Enum.Font.GothamBold
+    AdminTitle.TextSize = 14
+    AdminTitle.TextXAlignment = Enum.TextXAlignment.Left
+    AdminTitle.Parent = AdminPage
+end
+
+-- Открываем вкладку "Главная" по умолчанию
+Pages["Главная"].Visible = true
+Buttons["Главная"].BackgroundColor3 = Color3.fromRGB(45, 95, 210)
